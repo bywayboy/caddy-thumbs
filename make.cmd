@@ -1,0 +1,1 @@
+xcaddy build --with github.com/caddy-dns/alidns --with caddy-thumbs
