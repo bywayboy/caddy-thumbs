@@ -1,1 +1,1 @@
-xcaddy build --with github.com/caddy-dns/alidns --with caddy-thumbs
+xcaddy build --with github.com/caddy-dns/alidns --with git.exti.cc/bywayboy/caddy-thumbs
