@@ -1,4 +1,4 @@
-package main
+package caddy_thumbs
 
 import (
 	"errors"
