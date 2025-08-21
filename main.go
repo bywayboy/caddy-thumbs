@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -28,8 +31,12 @@ func init() {
 
 // ThumbsServer 实现一个缩略图生成服务器
 type ThumbsServer struct {
-	ImageRoot string `json:"image_root,omitempty"`
-	logger    *zap.Logger
+	ImageRoot     string `json:"image_root,omitempty"`
+	ThumbsRoot    string `json:"thumbs_root,omitempty"`
+	MaxDimension  int    `json:"max_dimension,omitempty"`
+	DefaultQuality int   `json:"default_quality,omitempty"`
+	CacheControl  string `json:"cache_control,omitempty"`
+	logger        *zap.Logger
 }
 
 // CaddyModule 返回模块信息
@@ -43,6 +50,21 @@ func (ThumbsServer) CaddyModule() caddy.ModuleInfo {
 // Provision 设置模块
 func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 	t.logger = ctx.Logger(t)
+	
+	// 设置默认值
+	if t.MaxDimension == 0 {
+		t.MaxDimension = 2000
+	}
+	if t.DefaultQuality == 0 {
+		t.DefaultQuality = 85
+	}
+	if t.CacheControl == "" {
+		t.CacheControl = "public, max-age=31536000" // 默认缓存一年
+	}
+	if t.ThumbsRoot == "" {
+		t.ThumbsRoot = "./thumbs" // 默认缩略图存储目录
+	}
+	
 	return nil
 }
 
@@ -51,34 +73,69 @@ func (t *ThumbsServer) Validate() error {
 	if t.ImageRoot == "" {
 		return errors.New("image_root is required")
 	}
+	if t.MaxDimension <= 0 {
+		return errors.New("max_dimension must be positive")
+	}
+	if t.DefaultQuality < 0 || t.DefaultQuality > 100 {
+		return errors.New("default_quality must be between 0 and 100")
+	}
 	return nil
 }
 
 // ServeHTTP 处理HTTP请求
 func (t ThumbsServer) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	// 解析请求路径，提取尺寸信息和原始图片路径
+	// 解析请求路径，提取模式、尺寸信息和原始图片路径
 	path := r.URL.Path
-	re := regexp.MustCompile(`^/thumbs/(m(\d+)x(\d+))/(.+)$`)
+	re := regexp.MustCompile(`^/thumbs/((\w)(\d+)x(\d+))(?:,([a-fA-F0-9]{6}))?(?:,q(\d+))?(?:,(\w+))?/(.+)$`)
 	matches := re.FindStringSubmatch(path)
-
-	if len(matches) != 5 {
+	
+	if len(matches) < 8 {
 		return caddyhttp.Error(http.StatusNotFound, errors.New("invalid thumbnail request format"))
 	}
 
-	sizeDir := matches[1]
-	width, _ := strconv.Atoi(matches[2])
-	height, _ := strconv.Atoi(matches[3])
-	imagePath := matches[4]
+	modeDir := matches[1]
 
 	// 构建缩略图路径和原始图片路径
-	thumbPath := filepath.Join(".", "thumbs", sizeDir, imagePath)
+	thumbPath := filepath.Join(t.ThumbsRoot, modeDir, imagePath)
 	originalPath := filepath.Join(t.ImageRoot, imagePath)
-
+	
 	// 检查缩略图是否已存在
 	if _, err := os.Stat(thumbPath); err == nil {
 		t.logger.Info("Serving existing thumbnail", zap.String("path", thumbPath))
+		// 设置缓存头
+		t.setCacheHeaders(w)
 		http.ServeFile(w, r, thumbPath)
 		return nil
+	}
+
+	mode := matches[2] // 获取模式字符
+	width, _ := strconv.Atoi(matches[3])
+	height, _ := strconv.Atoi(matches[4])
+	bgColorHex := matches[5]
+	qualityStr := matches[6]
+	format := matches[7]
+	imagePath := matches[8]
+
+	// 验证尺寸是否超过限制
+	if err := t.validateDimensions(width, height); err != nil {
+		t.logger.Warn("Dimension validation failed", zap.Error(err))
+		return caddyhttp.Error(http.StatusBadRequest, err)
+	}
+
+	// 解析质量参数
+	quality := t.DefaultQuality
+	if qualityStr != "" {
+		if q, err := strconv.Atoi(qualityStr); err == nil && q >= 0 && q <= 100 {
+			quality = q
+		}
+	}
+
+	// 解析背景颜色
+	var bgColor color.Color = color.White
+	if bgColorHex != "" {
+		if c, err := parseHexColor(bgColorHex); err == nil {
+			bgColor = c
+		}
 	}
 
 	// 检查原始图片是否存在
@@ -94,19 +151,61 @@ func (t ThumbsServer) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
 
-	// 生成缩略图
-	if err := t.generateThumbnail(originalPath, thumbPath, uint(width), uint(height)); err != nil {
+	// 根据模式生成缩略图
+	var err error
+	switch mode {
+	case "m": // 保持纵横比，缩放到目标尺寸以内
+		err = t.generateThumbnailModeM(originalPath, thumbPath, uint(width), uint(height), quality, format)
+	case "c": // 保持纵横比，缩放到目标尺寸以内，然后从中心裁剪
+		err = t.generateThumbnailModeC(originalPath, thumbPath, uint(width), uint(height), quality, format)
+	case "w": // 保持纵横比，缩放到目标尺寸以内，然后将不足的部分填充为指定颜色
+		err = t.generateThumbnailModeW(originalPath, thumbPath, uint(width), uint(height), bgColor, quality, format)
+	case "f": // 先缩放再填充，确保完全填充目标区域
+		err = t.generateThumbnailModeF(originalPath, thumbPath, uint(width), uint(height), bgColor, quality, format)
+	default:
+		err = fmt.Errorf("unsupported thumbnail mode: %s", mode)
+	}
+
+	if err != nil {
 		t.logger.Error("Failed to generate thumbnail", zap.Error(err))
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
 
-	t.logger.Info("Generated and served new thumbnail", zap.String("path", thumbPath))
+	t.logger.Info("Generated and served new thumbnail", 
+		zap.String("path", thumbPath), 
+		zap.String("mode", mode),
+		zap.Int("quality", quality),
+		zap.String("format", format))
+	
+	// 设置缓存头
+	t.setCacheHeaders(w)
 	http.ServeFile(w, r, thumbPath)
 	return nil
 }
 
-// generateThumbnail 生成缩略图
-func (t ThumbsServer) generateThumbnail(originalPath, thumbPath string, width, height uint) error {
+// setCacheHeaders 设置缓存头
+func (t ThumbsServer) setCacheHeaders(w http.ResponseWriter) {
+	if t.CacheControl != "" {
+		w.Header().Set("Cache-Control", t.CacheControl)
+		w.Header().Set("Expires", time.Now().AddDate(1, 0, 0).Format(http.TimeFormat))
+	}
+}
+
+// validateDimensions 验证尺寸是否超过限制
+func (t ThumbsServer) validateDimensions(width, height int) error {
+	if width > t.MaxDimension || height > t.MaxDimension {
+		return fmt.Errorf("dimensions too large: %dx%d (max: %dx%d)", width, height, t.MaxDimension, t.MaxDimension)
+	}
+	
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("invalid dimensions: %dx%d", width, height)
+	}
+	
+	return nil
+}
+
+// generateThumbnailModeM 模式m：保持纵横比，缩放到目标尺寸以内
+func (t ThumbsServer) generateThumbnailModeM(originalPath, thumbPath string, width, height uint, quality int, format string) error {
 	// 打开原始图片文件
 	file, err := os.Open(originalPath)
 	if err != nil {
@@ -115,41 +214,266 @@ func (t ThumbsServer) generateThumbnail(originalPath, thumbPath string, width, h
 	defer file.Close()
 
 	// 解码图片
-	var img image.Image
-	ext := strings.ToLower(filepath.Ext(originalPath))
-
-	switch ext {
-	case ".jpg", ".jpeg":
-		img, err = jpeg.Decode(file)
-	case ".png":
-		img, err = png.Decode(file)
-	default:
-		return fmt.Errorf("unsupported image format: %s", ext)
-	}
-
+	img, err := t.decodeImage(file, originalPath)
 	if err != nil {
 		return err
 	}
 
-	// 生成缩略图
+	// 生成缩略图（保持纵横比）
 	thumb := resize.Thumbnail(width, height, img, resize.Lanczos3)
 
+	// 保存缩略图
+	return t.encodeImage(thumb, thumbPath, originalPath, quality, format)
+}
+
+// generateThumbnailModeC 模式c：保持纵横比，缩放到目标尺寸以内，然后从中心裁剪
+func (t ThumbsServer) generateThumbnailModeC(originalPath, thumbPath string, width, height uint, quality int, format string) error {
+	// 打开原始图片文件
+	file, err := os.Open(originalPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// 解码图片
+	img, err := t.decodeImage(file, originalPath)
+	if err != nil {
+		return err
+	}
+
+	// 计算缩放比例，使至少一边等于目标尺寸
+	origBounds := img.Bounds()
+	origWidth := uint(origBounds.Dx())
+	origHeight := uint(origBounds.Dy())
+
+	// 计算缩放比例
+	widthRatio := float64(width) / float64(origWidth)
+	heightRatio := float64(height) / float64(origHeight)
+	scale := widthRatio
+	if heightRatio > widthRatio {
+		scale = heightRatio
+	}
+
+	// 缩放图片
+	scaledWidth := uint(float64(origWidth) * scale)
+	scaledHeight := uint(float64(origHeight) * scale)
+	resized := resize.Resize(scaledWidth, scaledHeight, img, resize.Lanczos3)
+
+	// 从中心裁剪
+	resizedBounds := resized.Bounds()
+	x0 := (resizedBounds.Dx() - int(width)) / 2
+	y0 := (resizedBounds.Dy() - int(height)) / 2
+	x1 := x0 + int(width)
+	y1 := y0 + int(height)
+
+	// 确保裁剪区域在图片范围内
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > resizedBounds.Dx() {
+		x1 = resizedBounds.Dx()
+	}
+	if y1 > resizedBounds.Dy() {
+		y1 = resizedBounds.Dy()
+	}
+
+	cropped := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	draw.Draw(cropped, cropped.Bounds(), resized, image.Point{x0, y0}, draw.Src)
+
+	// 保存缩略图
+	return t.encodeImage(cropped, thumbPath, originalPath, quality, format)
+}
+
+// generateThumbnailModeW 模式w：保持纵横比，缩放到目标尺寸以内，然后将不足的部分填充为指定颜色
+func (t ThumbsServer) generateThumbnailModeW(originalPath, thumbPath string, width, height uint, bgColor color.Color, quality int, format string) error {
+	// 打开原始图片文件
+	file, err := os.Open(originalPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// 解码图片
+	img, err := t.decodeImage(file, originalPath)
+	if err != nil {
+		return err
+	}
+
+	// 生成缩略图（保持纵横比）
+	resized := resize.Thumbnail(width, height, img, resize.Lanczos3)
+
+	// 创建目标大小的画布
+	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	
+	// 填充背景色
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
+	
+	// 计算居中位置
+	resizedBounds := resized.Bounds()
+	x := (int(width) - resizedBounds.Dx()) / 2
+	y := (int(height) - resizedBounds.Dy()) / 2
+	
+	// 将缩略图绘制到画布上
+	draw.Draw(canvas, image.Rect(x, y, x+resizedBounds.Dx(), y+resizedBounds.Dy()), resized, image.Point{}, draw.Over)
+
+	// 保存缩略图
+	return t.encodeImage(canvas, thumbPath, originalPath, quality, format)
+}
+
+// generateThumbnailModeF 模式f：先缩放再填充，确保完全填充目标区域
+func (t ThumbsServer) generateThumbnailModeF(originalPath, thumbPath string, width, height uint, bgColor color.Color, quality int, format string) error {
+	// 打开原始图片文件
+	file, err := os.Open(originalPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// 解码图片
+	img, err := t.decodeImage(file, originalPath)
+	if err != nil {
+		return err
+	}
+
+	// 计算缩放比例，使图片完全覆盖目标区域
+	origBounds := img.Bounds()
+	origWidth := uint(origBounds.Dx())
+	origHeight := uint(origBounds.Dy())
+
+	widthRatio := float64(width) / float64(origWidth)
+	heightRatio := float64(height) / float64(origHeight)
+	scale := widthRatio
+	if heightRatio > widthRatio {
+		scale = heightRatio
+	}
+
+	// 缩放图片
+	scaledWidth := uint(float64(origWidth) * scale)
+	scaledHeight := uint(float64(origHeight) * scale)
+	resized := resize.Resize(scaledWidth, scaledHeight, img, resize.Lanczos3)
+
+	// 从中心裁剪
+	resizedBounds := resized.Bounds()
+	x0 := (resizedBounds.Dx() - int(width)) / 2
+	y0 := (resizedBounds.Dy() - int(height)) / 2
+	x1 := x0 + int(width)
+	y1 := y0 + int(height)
+
+	// 确保裁剪区域在图片范围内
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > resizedBounds.Dx() {
+		x1 = resizedBounds.Dx()
+	}
+	if y1 > resizedBounds.Dy() {
+		y1 = resizedBounds.Dy()
+	}
+
+	cropped := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	draw.Draw(cropped, cropped.Bounds(), resized, image.Point{x0, y0}, draw.Src)
+
+	// 保存缩略图
+	return t.encodeImage(cropped, thumbPath, originalPath, quality, format)
+}
+
+// decodeImage 解码图片
+func (t ThumbsServer) decodeImage(file *os.File, path string) (image.Image, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	
+	switch ext {
+	case ".jpg", ".jpeg":
+		return jpeg.Decode(file)
+	case ".png":
+		return png.Decode(file)
+	case ".webp":
+		return t.decodeWebP(file)
+	case ".avif":
+		return t.decodeAVIF(file)
+	default:
+		return nil, fmt.Errorf("unsupported image format: %s", ext)
+	}
+}
+
+// encodeImage 编码并保存图片
+func (t ThumbsServer) encodeImage(img image.Image, path, originalPath string, quality int, format string) error {
 	// 创建缩略图文件
-	thumbFile, err := os.Create(thumbPath)
+	thumbFile, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer thumbFile.Close()
 
-	// 编码并保存缩略图
-	switch ext {
-	case ".jpg", ".jpeg":
-		err = jpeg.Encode(thumbFile, thumb, nil)
-	case ".png":
-		err = png.Encode(thumbFile, thumb)
+	// 确定输出格式
+	outputFormat := strings.ToLower(filepath.Ext(originalPath))
+	if format != "" {
+		outputFormat = "." + format
 	}
+	
+	// 根据格式保存图片
+	switch outputFormat {
+	case ".jpg", ".jpeg":
+		return jpeg.Encode(thumbFile, img, &jpeg.Options{Quality: quality})
+	case ".png":
+		return png.Encode(thumbFile, img)
+	case ".webp":
+		return t.encodeWebP(thumbFile, img, quality)
+	case ".avif":
+		return t.encodeAVIF(thumbFile, img, quality)
+	default:
+		return fmt.Errorf("unsupported output format: %s", outputFormat)
+	}
+}
 
-	return err
+// decodeWebP 解码WebP图片
+func (t ThumbsServer) decodeWebP(file *os.File) (image.Image, error) {
+	// 这里使用一个假设的WebP解码库
+	// 实际使用时需要引入真实的WebP解码库，如 github.com/chai2010/webp
+	return nil, errors.New("WebP decoding not implemented")
+}
+
+// encodeWebP 编码WebP图片
+func (t ThumbsServer) encodeWebP(file *os.File, img image.Image, quality int) error {
+	// 这里使用一个假设的WebP编码库
+	// 实际使用时需要引入真实的WebP编码库，如 github.com/chai2010/webp
+	return errors.New("WebP encoding not implemented")
+}
+
+// decodeAVIF 解码AVIF图片
+func (t ThumbsServer) decodeAVIF(file *os.File) (image.Image, error) {
+	// 这里使用一个假设的AVIF解码库
+	// 实际使用时需要引入真实的AVIF解码库，如 github.com/Kagami/go-avif
+	return nil, errors.New("AVIF decoding not implemented")
+}
+
+// encodeAVIF 编码AVIF图片
+func (t ThumbsServer) encodeAVIF(file *os.File, img image.Image, quality int) error {
+	// 这里使用一个假设的AVIF编码库
+	// 实际使用时需要引入真实的AVIF编码库，如 github.com/Kagami/go-avif
+	return errors.New("AVIF encoding not implemented")
+}
+
+// parseHexColor 解析十六进制颜色代码
+func parseHexColor(s string) (color.RGBA, error) {
+	if len(s) != 6 {
+		return color.RGBA{}, fmt.Errorf("invalid color format: %s", s)
+	}
+	
+	r, err1 := strconv.ParseUint(s[0:2], 16, 8)
+	g, err2 := strconv.ParseUint(s[2:4], 16, 8)
+	b, err3 := strconv.ParseUint(s[4:6], 16, 8)
+	
+	if err1 != nil || err2 != nil || err3 != nil {
+		return color.RGBA{}, fmt.Errorf("invalid color format: %s", s)
+	}
+	
+	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}, nil
 }
 
 // UnmarshalCaddyfile 解析Caddyfile配置
@@ -162,6 +486,34 @@ func (t *ThumbsServer) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.ArgErr()
 				}
 				t.ImageRoot = d.Val()
+			case "thumbs_root":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				t.ThumbsRoot = d.Val()
+			case "max_dimension":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				if val, err := strconv.Atoi(d.Val()); err == nil {
+					t.MaxDimension = val
+				} else {
+					return d.Errf("invalid max_dimension value: %s", d.Val())
+				}
+			case "default_quality":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				if val, err := strconv.Atoi(d.Val()); err == nil {
+					t.DefaultQuality = val
+				} else {
+					return d.Errf("invalid default_quality value: %s", d.Val())
+				}
+			case "cache_control":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				t.CacheControl = d.Val()
 			default:
 				return d.Errf("unrecognized subdirective: %s", d.Val())
 			}
@@ -184,3 +536,7 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*ThumbsServer)(nil)
 	_ caddyfile.Unmarshaler       = (*ThumbsServer)(nil)
 )
+
+func main() {
+	// 空的主函数，因为这是一个Caddy模块
+}
