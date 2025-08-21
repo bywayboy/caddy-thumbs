@@ -1,4 +1,4 @@
-module git.exti.cc/bywayboy/caddy-thumbs
+module github.com/bywayboy/caddy-thumbs
 
 go 1.24.6
 
