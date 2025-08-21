@@ -59,5 +59,6 @@ site.com {
 现在您可以使用新的 thumbs_root 配置来指定缩略图的存储目录：
 
 1. `https://site.com/thumbs/m100x100/image.jpg` - 缩略图将保存在 /data/www/thumbs/m100x100/image.jpg
-2. `https://site.com/thumbs/c200x200,q85/image.jpg` - 缩略图将保存在 /data/www/thumbs/c200x200/image.jpg
-3. `https://site.com/thumbs/w300x300,ff0000/image.jpg` - 缩略图将保存在 /data/www/thumbs/w300x300/image.jpg
+2. `https://site.com/thumbs/c200x200,q85/image.jpg` - 缩略图将保存在 /data/www/thumbs/c200x200,q85/image.jpg
+3. `https://site.com/thumbs/w300x300,ff0000/image.jpg` - 缩略图将保存在 /data/www/thumbs/w300x300,ff0000/image.jpg
+

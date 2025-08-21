@@ -37,6 +37,7 @@ type ThumbsServer struct {
 	DefaultQuality int   `json:"default_quality,omitempty"`
 	CacheControl  string `json:"cache_control,omitempty"`
 	logger        *zap.Logger
+	regex         *regexp.Regexp // 实例特定的正则表达式
 }
 
 // CaddyModule 返回模块信息
@@ -61,10 +62,12 @@ func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 	if t.CacheControl == "" {
 		t.CacheControl = "public, max-age=31536000" // 默认缓存一年
 	}
+
 	if t.ThumbsRoot == "" {
 		t.ThumbsRoot = "./thumbs" // 默认缩略图存储目录
 	}
-	
+
+	t.regex = regexp.MustCompile(`^.*\/((\w)(\d+)x(\d+)(?:,([a-fA-F0-9]{6}))?(?:,q(\d+))?(?:,(\w+))?)\/(.+)$`)
 	return nil
 }
 
@@ -86,28 +89,13 @@ func (t *ThumbsServer) Validate() error {
 func (t ThumbsServer) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// 解析请求路径，提取模式、尺寸信息和原始图片路径
 	path := r.URL.Path
-	re := regexp.MustCompile(`^/thumbs/((\w)(\d+)x(\d+))(?:,([a-fA-F0-9]{6}))?(?:,q(\d+))?(?:,(\w+))?/(.+)$`)
-	matches := re.FindStringSubmatch(path)
+	matches := t.regex.FindStringSubmatch(path)
 	
 	if len(matches) < 8 {
 		return caddyhttp.Error(http.StatusNotFound, errors.New("invalid thumbnail request format"))
 	}
 
 	modeDir := matches[1]
-
-	// 构建缩略图路径和原始图片路径
-	thumbPath := filepath.Join(t.ThumbsRoot, modeDir, imagePath)
-	originalPath := filepath.Join(t.ImageRoot, imagePath)
-	
-	// 检查缩略图是否已存在
-	if _, err := os.Stat(thumbPath); err == nil {
-		t.logger.Info("Serving existing thumbnail", zap.String("path", thumbPath))
-		// 设置缓存头
-		t.setCacheHeaders(w)
-		http.ServeFile(w, r, thumbPath)
-		return nil
-	}
-
 	mode := matches[2] // 获取模式字符
 	width, _ := strconv.Atoi(matches[3])
 	height, _ := strconv.Atoi(matches[4])
@@ -136,6 +124,19 @@ func (t ThumbsServer) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		if c, err := parseHexColor(bgColorHex); err == nil {
 			bgColor = c
 		}
+	}
+
+	// 构建缩略图路径和原始图片路径
+	thumbPath := filepath.Join(t.ThumbsRoot, modeDir, imagePath)
+	originalPath := filepath.Join(t.ImageRoot, imagePath)
+	
+	// 检查缩略图是否已存在
+	if _, err := os.Stat(thumbPath); err == nil {
+		t.logger.Info("Serving existing thumbnail", zap.String("path", thumbPath))
+		// 设置缓存头
+		t.setCacheHeaders(w)
+		http.ServeFile(w, r, thumbPath)
+		return nil
 	}
 
 	// 检查原始图片是否存在
