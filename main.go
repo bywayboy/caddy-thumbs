@@ -9,7 +9,9 @@ import (
 	"image/jpeg"
 	"image/png"
 	"net/http"
+	"io"
 	"os"
+	"bytes"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -215,7 +217,7 @@ func (t ThumbsServer) generateThumbnailModeM(originalPath, thumbPath string, wid
 	defer file.Close()
 
 	// 解码图片
-	img, err := t.decodeImage(file, originalPath)
+	img, err := t.decodeImage(file)
 	if err != nil {
 		return err
 	}
@@ -237,7 +239,7 @@ func (t ThumbsServer) generateThumbnailModeC(originalPath, thumbPath string, wid
 	defer file.Close()
 
 	// 解码图片
-	img, err := t.decodeImage(file, originalPath)
+	img, err := t.decodeImage(file)
 	if err != nil {
 		return err
 	}
@@ -298,7 +300,7 @@ func (t ThumbsServer) generateThumbnailModeW(originalPath, thumbPath string, wid
 	defer file.Close()
 
 	// 解码图片
-	img, err := t.decodeImage(file, originalPath)
+	img, err := t.decodeImage(file)
 	if err != nil {
 		return err
 	}
@@ -334,7 +336,7 @@ func (t ThumbsServer) generateThumbnailModeF(originalPath, thumbPath string, wid
 	defer file.Close()
 
 	// 解码图片
-	img, err := t.decodeImage(file, originalPath)
+	img, err := t.decodeImage(file)
 	if err != nil {
 		return err
 	}
@@ -384,22 +386,45 @@ func (t ThumbsServer) generateThumbnailModeF(originalPath, thumbPath string, wid
 	return t.encodeImage(cropped, thumbPath, originalPath, quality, format)
 }
 
+var (
+	jpegHeader = []byte{0xFF, 0xD8}
+	pngHeader  = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	webpHeader = []byte("RIFF")
+	webpHeader2 = []byte("WEBP")
+	avifHeader = []byte("ftyp")
+)
+
 // decodeImage 解码图片
-func (t ThumbsServer) decodeImage(file *os.File, path string) (image.Image, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	
-	switch ext {
-	case ".jpg", ".jpeg":
-		return jpeg.Decode(file)
-	case ".png":
-		return png.Decode(file)
-	case ".webp":
-		return t.decodeWebP(file)
-	case ".avif":
-		return t.decodeAVIF(file)
-	default:
-		return nil, fmt.Errorf("unsupported image format: %s", ext)
+func (t ThumbsServer) decodeImage(file *os.File) (image.Image, error) {
+	var (
+		buf = make([]byte, 16)
+		numRead int
+		err error
+	)
+	if numRead, err = file.Read(buf); err != nil{
+		return nil, fmt.Errorf("failed to read file header: %v", err)
 	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+        return nil, fmt.Errorf("failed to reset file position: %v", err)
+    }
+	
+	if numRead >= 2 {
+		switch  {
+			case bytes.HasPrefix(buf, jpegHeader):
+				return jpeg.Decode(file)
+			case bytes.HasPrefix(buf, pngHeader):
+				return png.Decode(file)
+			case bytes.HasPrefix(buf, webpHeader):
+				return t.decodeWebP(file)
+			case bytes.HasPrefix(buf, webpHeader2):
+				return t.decodeWebP(file)
+			case bytes.HasPrefix(buf, avifHeader):
+				return t.decodeAVIF(file)
+			default:
+				return nil, fmt.Errorf("unsupported image format!")
+		}
+	}
+	return nil, fmt.Errorf("unsupported image format!")
 }
 
 // encodeImage 编码并保存图片
