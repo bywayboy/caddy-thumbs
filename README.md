@@ -30,7 +30,7 @@ site.com {
 ```
 
 ### 完整配置示例
-```
+```caddyfile
 site.com {
      root * /data/www
      route /thumbs/* {
