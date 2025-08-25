@@ -1,9 +1,8 @@
 ## Description:
 
-[简体中文](./README_CN.md)
-[English](./README.md)
+[简体中文](./README_CN.md) | [English](./README.md)
 
-[简体中文]
+
 This is a thumbnail generation plugin running on Caddy2. It implements several scaling modes and supports multiple storage methods through storage plugins.
 
 

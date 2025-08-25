@@ -1,7 +1,6 @@
 ## 项目说明:
 
-[简体中文](./README_CN.md)
-[English](./README.md)
+[简体中文](./README_CN.md) | [English](./README.md)
 
 这是一个运行与 Caddy2 上的缩略图生成插件. 它实现了几种缩放模式, 通过存储引擎插件支持多种存储方式.
 
