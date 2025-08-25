@@ -1,5 +1,28 @@
 ## 项目说明:
 
+# 编译方法
+
+第一步 安装依赖包
+```shell
+# Ubuntu/Debian
+sudo apt-get install libwebp-dev
+
+# CentOS/RHEL
+sudo yum install libwebp-devel
+
+# macOS
+brew install webp
+```
+
+第二步 安装开始编译
+```
+export CGO_CFLAGS="-I/usr/local/include"
+export CGO_LDFLAGS="-L/usr/local/lib -lwebp"
+export CGO_ENABLED=1
+# 使用xcaddy 编译
+xcaddy build --with github.com/caddy-dns/alidns --with git.exti.cc/bywayboy/caddy-thumbs=./caddy-thumbs
+```
+
 这是一个Caddy的缩略图生成插件. 它实现了几种缩放模式, 通过存储引擎插件支持多种存储方式.
 
 | 缩放模式 | 说明 |
