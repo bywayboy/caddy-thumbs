@@ -28,7 +28,9 @@ export CGO_ENABLED=1
 xcaddy build --with github.com/caddy-dns/alidns --with git.exti.cc/bywayboy/caddy-thumbs=./caddy-thumbs
 ```
 
-这是一个Caddy的缩略图生成插件. 它实现了几种缩放模式, 通过存储引擎插件支持多种存储方式.
+## 使用方式
+
+URL格式: `https://site.com/<prefix>/{mode}{width}x{height},{param}/{image_path}`
 
 | 缩放模式 | 说明 |
 |-------|-------|
@@ -36,6 +38,11 @@ xcaddy build --with github.com/caddy-dns/alidns --with git.exti.cc/bywayboy/cadd
 | c | 缩放到目标尺寸以内，然后从中心裁剪（exactly 目标尺寸） |
 | w | 缩放到目标尺寸以内，然后将不足的部分填充为指定颜色（exactly 目标尺寸） |
 | f  | 填充并裁剪模式,先缩放，然后超出的地方居中剪裁。(exactly 目标尺寸) |
+
+## param 是可选的，格式为 `{color},q{quality}`
+
+quality 质量参数, q1-q100, 默认为 q90
+color 填充颜色, 格式为 #RRGGBB, 默认为 #FFFFFF
 
 
 ## 配置演示
@@ -77,11 +84,11 @@ site.com {
 }
 ```
 
-## 使用示例
 
 现在您可以使用新的 thumbs_root 配置来指定缩略图的存储目录：
 
 1. `https://site.com/thumbs/m100x100/image.jpg` - 缩略图将保存在 /data/www/thumbs/m100x100/image.jpg
 2. `https://site.com/thumbs/c200x200,q85/image.jpg` - 缩略图将保存在 /data/www/thumbs/c200x200,q85/image.jpg
 3. `https://site.com/thumbs/w300x300,ff0000/image.jpg` - 缩略图将保存在 /data/www/thumbs/w300x300,ff0000/image.jpg
+4. `https://site.com/thumbs/f400x400,ff0000,q90/image.jpg` - 缩略图将保存在 /data/www/thumbs/f400x400,ff0000,q90/image.jpg
 

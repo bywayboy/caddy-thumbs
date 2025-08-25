@@ -28,12 +28,9 @@ export CGO_ENABLED=1
 xcaddy build --with github.com/caddy-dns/alidns --with git.exti.cc/bywayboy/caddy-thumbs=./caddy-thumbs   
 ```
 
+## Usage
 
-This is a Caddy plugin for thumbnail generation. It implements several scaling modes and supports multiple storage methods through storage engine plugins.
-
-
-
-
+URL Format: `https://site.com/<prefix>/{mode}{width}x{height},{param}/{image_path}`
 
 | Scaling Mode | Description |
 |-------|-------|
@@ -42,8 +39,13 @@ This is a Caddy plugin for thumbnail generation. It implements several scaling m
 | w | Scales within target dimensions, then fills remaining area with specified color (exactly target size) |
 | f | Fill-and-crop mode: scales first, then center-crops excess area (exactly target size) |
 
+`param` is optional, format is `{color},q{quality}`
 
-## Configuration Demo
+`color` is optional, format is `#RRGGBB`, default is `#FFFFFF`
+
+`quality` is optional, range is `q1-q100`, default is `q90`
+
+
 
 ### Basic Configuration
 ```caddyfile
@@ -90,4 +92,5 @@ You can now use the new thumbs_root configuration to specify the thumbnail stora
 1. https://site.com/thumbs/m100x100/image.jpg - Thumbnail saved at /data/www/thumbs/m100x100/image.jpg
 2. https://site.com/thumbs/c200x200,q85/image.jpg - Thumbnail saved at /data/www/thumbs/c200x200,q85/image.jpg
 3. https://site.com/thumbs/w300x300,ff0000/image.jpg - Thumbnail saved at /data/www/thumbs/w300x300,ff0000/image.jpg
+4. https://site.com/thumbs/f400x400,ff0000,q90/image.jpg - Thumbnail saved at /data/www/thumbs/f400x400,ff0000,q90/image.jpg
 
