@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/chai2010/webp"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -401,11 +403,9 @@ func (t ThumbsServer) decodeImage(reader io.Reader) (image.Image, error) {
 		case bytes.HasPrefix(buf, pngHeader):
 			return png.Decode(multiReader)
 		case bytes.HasPrefix(buf, webpHeader):
-			return t.decodeWebP(multiReader)
+			return webp.Decode(reader)
 		case bytes.HasPrefix(buf, webpHeader2):
-			return t.decodeWebP(multiReader)
-		case bytes.HasPrefix(buf, avifHeader):
-			return t.decodeAVIF(multiReader)
+			return webp.Decode(reader)
 		default:
 			return nil, fmt.Errorf("unsupported image format!")
 		}
@@ -430,9 +430,7 @@ func (t ThumbsServer) encodeImage(img image.Image, quality int, format string) (
 	case ".png":
 		err = png.Encode(writer, img)
 	case ".webp":
-		err = t.encodeWebP(writer, img, quality)
-	case ".avif":
-		err = t.encodeAVIF(writer, img, quality)
+		err = webp.Encode(writer, img, &webp.Options{Quality: float32(quality)})
 	default:
 		return nil, fmt.Errorf("unsupported output format: %s", format)
 	}
@@ -440,34 +438,6 @@ func (t ThumbsServer) encodeImage(img image.Image, quality int, format string) (
 		return nil, err
 	}
 	return writer.(*bytes.Buffer).Bytes(), nil
-}
-
-// decodeWebP 解码WebP图片
-func (t ThumbsServer) decodeWebP(reader io.Reader) (image.Image, error) {
-	// 这里使用一个假设的WebP解码库
-	// 实际使用时需要引入真实的WebP解码库，如 github.com/chai2010/webp
-	return nil, errors.New("WebP decoding not implemented")
-}
-
-// encodeWebP 编码WebP图片
-func (t ThumbsServer) encodeWebP(writer io.Writer, img image.Image, quality int) error {
-	// 这里使用一个假设的WebP编码库
-	// 实际使用时需要引入真实的WebP编码库，如 github.com/chai2010/webp
-	return errors.New("WebP encoding not implemented")
-}
-
-// decodeAVIF 解码AVIF图片
-func (t ThumbsServer) decodeAVIF(reader io.Reader) (image.Image, error) {
-	// 这里使用一个假设的AVIF解码库
-	// 实际使用时需要引入真实的AVIF解码库，如 github.com/Kagami/go-avif
-	return nil, errors.New("AVIF decoding not implemented")
-}
-
-// encodeAVIF 编码AVIF图片
-func (t ThumbsServer) encodeAVIF(writer io.Writer, img image.Image, quality int) error {
-	// 这里使用一个假设的AVIF编码库
-	// 实际使用时需要引入真实的AVIF编码库，如 github.com/Kagami/go-avif
-	return errors.New("AVIF encoding not implemented")
 }
 
 // parseHexColor 解析十六进制颜色代码
