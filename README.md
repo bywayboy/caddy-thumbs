@@ -49,19 +49,6 @@ site.com {
 }
 ```
 
-### 使用相对路径的配置
-
-```caddyfile
-site.com {
-   root * /data/www
-   route /thumbs/* {
-        thumbs_server {
-             image_root ./images
-             thumbs_root ./thumbs
-        }
-   }
-}
-```
 ## 使用示例
 
 现在您可以使用新的 thumbs_root 配置来指定缩略图的存储目录：
