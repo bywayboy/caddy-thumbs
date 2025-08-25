@@ -1,6 +1,6 @@
 ## 项目说明:
 
-这是一个Caddy的缩略图生成插件. 它实现了几种缩放模式.
+这是一个Caddy的缩略图生成插件. 它实现了几种缩放模式, 通过存储引擎插件支持多种存储方式.
 
 | 缩放模式 | 说明 |
 |-------|-------|
@@ -18,8 +18,12 @@ site.com {
      root * /data/www
      route /thumbs/* {
           thumbs_server {
-               image_root /data/www/images
-               thumbs_root /data/www/thumbs
+               thumbs_storage file_system {
+                    root /data/wwwroot/fserver/public/thumbs
+               }
+               image_storage file_system {
+                    root /data/wwwroot/fserver/public/images
+               }
         }
      }
 }
@@ -31,8 +35,12 @@ site.com {
      root * /data/www
      route /thumbs/* {
           thumbs_server {
-               image_root /data/www/images
-               thumbs_root /data/www/thumbs
+               thumbs_storage file_system {
+                    root /data/wwwroot/fserver/public/thumbs
+               }
+               image_storage file_system {
+                    root /data/wwwroot/fserver/public/images
+               }
                max_dimension 2000
                default_quality 90
                cache_control "public, max-age=31536000, immutable"
