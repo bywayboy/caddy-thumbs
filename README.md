@@ -35,9 +35,8 @@ URL Format: `https://site.com/<prefix>/{mode}{width}x{height},{param}/{image_pat
 | Scaling Mode | Description |
 |-------|-------|
 | m | Maintains aspect ratio, scales within target dimensions (may not be exactly target size) |
-| c | Scales within target dimensions, then crops from center (exactly target size) |
-| w | Scales within target dimensions, then fills remaining area with specified color (exactly target size) |
-| f | Fill-and-crop mode: scales first, then center-crops excess area (exactly target size) |
+| wlt,wlc,wlb,wrt,wrc,wrb,wcc or w | Scale the image to within the target size, with the image in the top left, middle left, bottom left, top right, middle again, middle again. Then fill the missing parts with the specified color (exactly the target size) |    
+| lt,lc,lb,rt,rc,rb,c | Top left, center left, bottom left, top right, both center and bottom, center to center alignment, scaling and cropping. (Exactly target size) |
 
 `param` is optional, format is `{color},q{quality}`
 

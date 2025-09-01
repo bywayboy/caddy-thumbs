@@ -29,6 +29,44 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	SCALE_MODE_M          = 0
+	SCALE_MODE_W          = 1
+	SCALE_MODE_WLT        = 2
+	SCALE_MODE_WLC        = 3
+	SCALE_MODE_WLB        = 4
+	SCALE_MODE_WRT        = 5
+	SCALE_MODE_WRC        = 6
+	SCALE_MODE_WRB        = 7
+	SCALE_MODE_WCC        = 8
+	CROP_MODE_LEFTTOP     = 9
+	CROP_MODE_LEFTMIDDLE  = 10
+	CROP_MODE_LEFTBOTTOM  = 11
+	CROP_MODE_RIGHTTOP    = 12
+	CROP_MODE_RIGHTMIDDLE = 13
+	CROP_MODE_RIGHTBOTTOM = 14
+	CROP_MODE_CENTER      = 15
+)
+
+var cropModeMap = map[string]int{
+	"m":   SCALE_MODE_M,
+	"w":   SCALE_MODE_W,
+	"wlt": SCALE_MODE_WLT,
+	"wlc": SCALE_MODE_WLC,
+	"wlb": SCALE_MODE_WLB,
+	"wrt": SCALE_MODE_WRT,
+	"wrc": SCALE_MODE_WRC,
+	"wrb": SCALE_MODE_WRB,
+	"wcc": SCALE_MODE_WCC,
+	"lt":  CROP_MODE_LEFTTOP,
+	"lc":  CROP_MODE_LEFTMIDDLE,
+	"lb":  CROP_MODE_LEFTBOTTOM,
+	"rt":  CROP_MODE_RIGHTTOP,
+	"rc":  CROP_MODE_RIGHTMIDDLE,
+	"rb":  CROP_MODE_RIGHTBOTTOM,
+	"c":   CROP_MODE_CENTER,
+}
+
 func init() {
 	caddy.RegisterModule(ThumbsServer{})
 	httpcaddyfile.RegisterHandlerDirective("thumbs_server", parseCaddyfile)
@@ -76,9 +114,6 @@ func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 	if t.ImageStorageRaw != nil {
 		storageMod, err := ctx.LoadModule(t, "ImageStorageRaw")
 		if err != nil {
-			return fmt.Errorf("loading storage module: %v", err)
-		}
-		if err != nil {
 			return fmt.Errorf("loading image storage module: %v", err)
 		}
 		t.imageStorage, _ = storageMod.(caddy.StorageConverter).CertMagicStorage()
@@ -88,9 +123,6 @@ func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 
 	if t.ThumbsStorageRaw != nil {
 		storageMod, err := ctx.LoadModule(t, "ThumbsStorageRaw")
-		if err != nil {
-			return fmt.Errorf("loading storage module: %v", err)
-		}
 		if err != nil {
 			return fmt.Errorf("loading image storage module: %v", err)
 		}
@@ -243,26 +275,59 @@ func (t ThumbsServer) generateThumbnail(reader io.Reader, width, height uint, mo
 	if err != nil {
 		return nil, err
 	}
-	// 根据模式生成缩略图
-	switch mode {
-	case "m":
-		img = resize.Thumbnail(width, height, img, resize.Lanczos3)
-	case "c":
-		img = t.generateThumbnailModeC(img, width, height)
-	case "w":
-		img = t.generateThumbnailModeW(img, width, height, bgColor)
-	case "f":
-		img = t.generateThumbnailModeF(img, width, height, bgColor)
-	default:
+	// 解析裁剪模式
+	modeId, ok := cropModeMap[mode]
+	if !ok {
 		return nil, fmt.Errorf("unsupported thumbnail mode: %s", mode)
+	}
+	// 根据模式生成缩略图
+	switch modeId {
+	case SCALE_MODE_M:
+		img = resize.Thumbnail(width, height, img, resize.Lanczos3)
+	case SCALE_MODE_WLT, SCALE_MODE_WLC, SCALE_MODE_WLB, SCALE_MODE_WRT, SCALE_MODE_WRC, SCALE_MODE_WRB, SCALE_MODE_WCC:
+		img = t.generateThumbnailModeW(img, width, height, bgColor, modeId)
+	case CROP_MODE_LEFTTOP, CROP_MODE_LEFTMIDDLE, CROP_MODE_LEFTBOTTOM, CROP_MODE_RIGHTTOP, CROP_MODE_RIGHTMIDDLE, CROP_MODE_RIGHTBOTTOM, CROP_MODE_CENTER:
+		img = t.generateThumbnailModeCrop(img, width, height, modeId)
 	}
 	// 编码缩略图
 	return t.encodeImage(img, quality, format)
 }
 
-// generateThumbnailModeC 模式c：保持纵横比，缩放到目标尺寸以内，然后从中心裁剪
-func (t ThumbsServer) generateThumbnailModeC(img image.Image, width, height uint) image.Image {
-	// 计算缩放比例，使至少一边等于目标尺寸
+// generateThumbnailModeW 模式w：保持纵横比，缩放到目标尺寸以内，然后将不足的部分填充为指定颜色
+func (t ThumbsServer) generateThumbnailModeW(img image.Image, width, height uint, bgColor color.Color, modeId int) image.Image {
+	// 生成缩略图（保持纵横比）
+	resized := resize.Thumbnail(width, height, img, resize.Lanczos3)
+
+	// 创建目标大小的画布,根据颜色值填充背景色
+	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
+	var (
+		resizedBounds     = resized.Bounds()
+		x, y          int = (int(width) - resizedBounds.Dx()) / 2, (int(height) - resizedBounds.Dy()) / 2
+	)
+	switch modeId {
+	case SCALE_MODE_WLT:
+		x, y = 0, 0
+	case SCALE_MODE_WLC:
+		x = (int(width) - resizedBounds.Dx()) / 2
+		y = 0
+	case SCALE_MODE_WLB:
+		x, y = 0, (int(height) - resizedBounds.Dy())
+	case SCALE_MODE_WRT:
+		x, y = (int(width) - resizedBounds.Dx()), 0
+	case SCALE_MODE_WRC:
+		x, y = (int(width) - resizedBounds.Dx()), (int(height) - resizedBounds.Dy())
+	case SCALE_MODE_WRB:
+		x, y = (int(width) - resizedBounds.Dx()), (int(height) - resizedBounds.Dy())
+	}
+
+	// 将缩略图绘制到画布上
+	draw.Draw(canvas, image.Rect(x, y, x+resizedBounds.Dx(), y+resizedBounds.Dy()), resized, image.Point{}, draw.Over)
+	return canvas
+}
+
+func (t ThumbsServer) generateThumbnailModeCrop(img image.Image, width, height uint, cropMode int) image.Image {
+	// 原始尺寸
 	origBounds := img.Bounds()
 	origWidth := uint(origBounds.Dx())
 	origHeight := uint(origBounds.Dy())
@@ -279,99 +344,42 @@ func (t ThumbsServer) generateThumbnailModeC(img image.Image, width, height uint
 	scaledWidth := uint(float64(origWidth) * scale)
 	scaledHeight := uint(float64(origHeight) * scale)
 	resized := resize.Resize(scaledWidth, scaledHeight, img, resize.Lanczos3)
-
-	// 从中心裁剪
-	resizedBounds := resized.Bounds()
-	x0 := (resizedBounds.Dx() - int(width)) / 2
-	y0 := (resizedBounds.Dy() - int(height)) / 2
-	x1 := x0 + int(width)
-	y1 := y0 + int(height)
-
-	// 确保裁剪区域在图片范围内
-	if x0 < 0 {
-		x0 = 0
+	// 计算裁剪位置
+	var (
+		resizedBounds = resized.Bounds()
+		// 计算裁剪位置
+		x = (resizedBounds.Dx() - int(width)) / 2
+		y = (resizedBounds.Dy() - int(height)) / 2
+	)
+	switch cropMode {
+	case CROP_MODE_LEFTTOP:
+		// 从左上角裁剪
+		x, y = 0, 0
+	case CROP_MODE_LEFTMIDDLE:
+		// 从左中裁剪
+		x, y = 0, (int(height)-resizedBounds.Dy())/2
+	case CROP_MODE_LEFTBOTTOM:
+		// 从左下裁剪
+		x, y = 0, int(height)-resizedBounds.Dy()
+	case CROP_MODE_RIGHTTOP:
+		// 从右上裁剪
+		x, y = int(width)-resizedBounds.Dx(), 0
+	case CROP_MODE_RIGHTMIDDLE:
+		// 从右中裁剪
+		x, y = int(width)-resizedBounds.Dx(), (int(height)-resizedBounds.Dy())/2
+	case CROP_MODE_RIGHTBOTTOM:
+		// 从右下裁剪
+		x, y = int(width)-resizedBounds.Dx(), int(height)-resizedBounds.Dy()
+	default: // 包含 CROP_MODE_CENTER
+		// 从中心裁剪
+		x, y = (int(width)-resizedBounds.Dx())/2, (int(height)-resizedBounds.Dy())/2
 	}
-	if y0 < 0 {
-		y0 = 0
-	}
-	if x1 > resizedBounds.Dx() {
-		x1 = resizedBounds.Dx()
-	}
-	if y1 > resizedBounds.Dy() {
-		y1 = resizedBounds.Dy()
-	}
-
-	cropped := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	draw.Draw(cropped, cropped.Bounds(), resized, image.Point{x0, y0}, draw.Src)
-	return cropped
-}
-
-// generateThumbnailModeW 模式w：保持纵横比，缩放到目标尺寸以内，然后将不足的部分填充为指定颜色
-func (t ThumbsServer) generateThumbnailModeW(img image.Image, width, height uint, bgColor color.Color) image.Image {
-	// 生成缩略图（保持纵横比）
-	resized := resize.Thumbnail(width, height, img, resize.Lanczos3)
 
 	// 创建目标大小的画布
 	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-
-	// 填充背景色
-	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
-
-	// 计算居中位置
-	resizedBounds := resized.Bounds()
-	x := (int(width) - resizedBounds.Dx()) / 2
-	y := (int(height) - resizedBounds.Dy()) / 2
-
-	// 将缩略图绘制到画布上
-	draw.Draw(canvas, image.Rect(x, y, x+resizedBounds.Dx(), y+resizedBounds.Dy()), resized, image.Point{}, draw.Over)
-
+	// 绘制裁剪后的图片
+	draw.Draw(canvas, canvas.Bounds(), resized, image.Point{x, y}, draw.Over)
 	return canvas
-}
-
-// generateThumbnailModeF 模式f：先缩放再填充，确保完全填充目标区域
-func (t ThumbsServer) generateThumbnailModeF(img image.Image, width, height uint, bgColor color.Color) image.Image {
-	// 计算缩放比例，使图片完全覆盖目标区域
-	origBounds := img.Bounds()
-	origWidth := uint(origBounds.Dx())
-	origHeight := uint(origBounds.Dy())
-
-	widthRatio := float64(width) / float64(origWidth)
-	heightRatio := float64(height) / float64(origHeight)
-	scale := widthRatio
-	if heightRatio > widthRatio {
-		scale = heightRatio
-	}
-
-	// 缩放图片
-	scaledWidth := uint(float64(origWidth) * scale)
-	scaledHeight := uint(float64(origHeight) * scale)
-	resized := resize.Resize(scaledWidth, scaledHeight, img, resize.Lanczos3)
-
-	// 从中心裁剪
-	resizedBounds := resized.Bounds()
-	x0 := (resizedBounds.Dx() - int(width)) / 2
-	y0 := (resizedBounds.Dy() - int(height)) / 2
-	x1 := x0 + int(width)
-	y1 := y0 + int(height)
-
-	// 确保裁剪区域在图片范围内
-	if x0 < 0 {
-		x0 = 0
-	}
-	if y0 < 0 {
-		y0 = 0
-	}
-	if x1 > resizedBounds.Dx() {
-		x1 = resizedBounds.Dx()
-	}
-	if y1 > resizedBounds.Dy() {
-		y1 = resizedBounds.Dy()
-	}
-
-	cropped := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	draw.Draw(cropped, cropped.Bounds(), resized, image.Point{x0, y0}, draw.Src)
-
-	return cropped
 }
 
 var (
@@ -407,7 +415,7 @@ func (t ThumbsServer) decodeImage(reader io.Reader) (image.Image, error) {
 		case bytes.HasPrefix(buf, webpHeader2):
 			return webp.Decode(reader)
 		default:
-			return nil, fmt.Errorf("unsupported image format!")
+			return nil, fmt.Errorf("unsupported image format")
 		}
 	}
 	return nil, fmt.Errorf("unsupported image format, file header: %x", buf[:numRead])
@@ -541,7 +549,3 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*ThumbsServer)(nil)
 	_ caddyfile.Unmarshaler       = (*ThumbsServer)(nil)
 )
-
-func main() {
-	// 空的主函数，因为这是一个Caddy模块
-}

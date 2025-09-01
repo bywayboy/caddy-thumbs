@@ -35,9 +35,8 @@ URL格式: `https://site.com/<prefix>/{mode}{width}x{height},{param}/{image_path
 | 缩放模式 | 说明 |
 |-------|-------|
 | m | 保持纵横比，缩放到目标尺寸以内（可能不是 exactly 目标尺寸） |
-| c | 缩放到目标尺寸以内，然后从中心裁剪（exactly 目标尺寸） |
-| w | 缩放到目标尺寸以内，然后将不足的部分填充为指定颜色（exactly 目标尺寸） |
-| f  | 填充并裁剪模式,先缩放，然后超出的地方居中剪裁。(exactly 目标尺寸) |
+| wlt,wlc,wlb,wrt,wrc,wrb,wcc或w | 缩放到目标尺寸以内，图片居左上、左中、左下，右上、又中，又下，中中。然后将不足的部分填充为指定颜色（exactly 目标尺寸） |
+| lt,lc,lb,rt,rc,rb,c | 左上、左中、左下，右上、又中，又下，中中 对齐缩放剪裁。(exactly 目标尺寸) |
 
 ## param 是可选的，格式为 `{color},q{quality}`
 
@@ -92,3 +91,6 @@ site.com {
 3. `https://site.com/thumbs/w300x300,ff0000/image.jpg` - 缩略图将保存在 /data/www/thumbs/w300x300,ff0000/image.jpg
 4. `https://site.com/thumbs/f400x400,ff0000,q90/image.jpg` - 缩略图将保存在 /data/www/thumbs/f400x400,ff0000,q90/image.jpg
 
+## 思考
+
+是否可以考虑使用 singleflight 来避免重复生成缩略图?
