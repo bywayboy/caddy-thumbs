@@ -131,7 +131,7 @@ func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("thumbs_storage is required")
 	}
 
-	t.regex = regexp.MustCompile(`^.*\/((\w)(\d+)x(\d+)(?:,([a-fA-F0-9]{6}))?(?:,q(\d+))?(?:,(\w+))?)\/((?:.+)(\.\w+))$`)
+	t.regex = regexp.MustCompile(`^.*\/((\w)(\d+)x(\d+)(?:,([a-fA-F0-9]{6}|[a-fA-F0-9]{8}))?(?:,q(\d+))?(?:,(\w+))?)\/((?:.+)(\.\w+))$`)
 	t.ctx = ctx
 	return nil
 }
@@ -450,19 +450,30 @@ func (t ThumbsServer) encodeImage(img image.Image, quality int, format string) (
 
 // parseHexColor 解析十六进制颜色代码
 func parseHexColor(s string) (color.RGBA, error) {
-	if len(s) != 6 {
+	if len(s) != 6 && len(s) != 8 {
+		return color.RGBA{}, fmt.Errorf("invalid color length: %s (must be 6 or 8)", s)
+	}
+
+	value, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
 		return color.RGBA{}, fmt.Errorf("invalid color format: %s", s)
 	}
 
-	r, err1 := strconv.ParseUint(s[0:2], 16, 8)
-	g, err2 := strconv.ParseUint(s[2:4], 16, 8)
-	b, err3 := strconv.ParseUint(s[4:6], 16, 8)
-
-	if err1 != nil || err2 != nil || err3 != nil {
-		return color.RGBA{}, fmt.Errorf("invalid color format: %s", s)
+	if len(s) == 6 {
+		return color.RGBA{
+			R: uint8(value >> 16),
+			G: uint8((value >> 8) & 0xFF),
+			B: uint8(value & 0xFF),
+			A: 255,
+		}, nil
 	}
 
-	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}, nil
+	return color.RGBA{
+		R: uint8(value >> 24),
+		G: uint8((value >> 16) & 0xFF),
+		B: uint8((value >> 8) & 0xFF),
+		A: uint8(value & 0xFF),
+	}, nil
 }
 
 // UnmarshalCaddyfile 解析Caddyfile配置
