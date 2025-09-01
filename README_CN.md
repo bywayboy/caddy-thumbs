@@ -35,8 +35,8 @@ URL格式: `https://site.com/<prefix>/{mode}{width}x{height},{param}/{image_path
 | 缩放模式 | 说明 |
 |-------|-------|
 | m | 保持纵横比，缩放到目标尺寸以内（可能不是 exactly 目标尺寸） |
-| wlt,wlc,wlb,wrt,wrc,wrb,wcc或w | 缩放到目标尺寸以内，图片居左上、左中、左下，右上、又中，又下，中中。然后将不足的部分填充为指定颜色（exactly 目标尺寸） |
-| lt,lc,lb,rt,rc,rb,c | 左上、左中、左下，右上、又中，又下，中中 对齐缩放剪裁。(exactly 目标尺寸) |
+| wlt,wlc,wlb,wrt,wrc,wrb,wcc或w | 缩放到目标尺寸以内，图片居左上、左中、左下，右上、右中，右下，中中。然后将不足的部分填充为指定颜色（exactly 目标尺寸） |
+| lt,lc,lb,rt,rc,rb,c | 左上、左中、左下，右上、右中，右下，中中 对齐缩放剪裁。(exactly 目标尺寸) |
 
 ## param 是可选的，格式为 `{color},q{quality}`
 
