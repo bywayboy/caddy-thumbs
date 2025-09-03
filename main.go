@@ -11,7 +11,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"math"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -32,30 +31,29 @@ import (
 
 const (
 	SCALE_MODE_M           = 0
-	SCALE_MODE_W           = 1
-	SCALE_MODE_WLT         = 2
-	SCALE_MODE_WLC         = 3
-	SCALE_MODE_WLB         = 4
-	SCALE_MODE_WRT         = 5
-	SCALE_MODE_WRC         = 6
-	SCALE_MODE_WRB         = 7
-	SCALE_MODE_WCC         = 8
-	SCALE_MODE_WCT         = 9
-	SCALE_MODE_WCB         = 10
-	CROP_MODE_LEFTTOP      = 11
-	CROP_MODE_LEFTMIDDLE   = 12
-	CROP_MODE_LEFTBOTTOM   = 13
-	CROP_MODE_RIGHTTOP     = 14
-	CROP_MODE_RIGHTMIDDLE  = 15
-	CROP_MODE_RIGHTBOTTOM  = 16
-	CROP_MODE_CENTERTOP    = 17
-	CROP_MODE_CENTERCENTER = 18
-	CROP_MODE_CENTERBOTTOM = 19
+	SCALE_MODE_WLT         = 1
+	SCALE_MODE_WLC         = 2
+	SCALE_MODE_WLB         = 3
+	SCALE_MODE_WRT         = 4
+	SCALE_MODE_WRC         = 5
+	SCALE_MODE_WRB         = 6
+	SCALE_MODE_WCC         = 7
+	SCALE_MODE_WCT         = 8
+	SCALE_MODE_WCB         = 9
+	CROP_MODE_LEFTTOP      = 10
+	CROP_MODE_LEFTMIDDLE   = 11
+	CROP_MODE_LEFTBOTTOM   = 12
+	CROP_MODE_RIGHTTOP     = 13
+	CROP_MODE_RIGHTMIDDLE  = 14
+	CROP_MODE_RIGHTBOTTOM  = 15
+	CROP_MODE_CENTERTOP    = 16
+	CROP_MODE_CENTERCENTER = 17
+	CROP_MODE_CENTERBOTTOM = 18
 )
 
 var cropModeMap = map[string]int{
 	"m":   SCALE_MODE_M,
-	"w":   SCALE_MODE_W,
+	"w":   SCALE_MODE_WCC,
 	"wlt": SCALE_MODE_WLT,
 	"wlc": SCALE_MODE_WLC,
 	"wlb": SCALE_MODE_WLB,
@@ -378,9 +376,9 @@ func (t ThumbsServer) generateThumbnailModeCrop(img image.Image, width, height u
 		case CROP_MODE_LEFTTOP, CROP_MODE_CENTERTOP, CROP_MODE_RIGHTTOP:
 			y = 0
 		case CROP_MODE_LEFTMIDDLE, CROP_MODE_CENTERCENTER, CROP_MODE_RIGHTMIDDLE:
-			y = int(math.Abs(float64((int(height) - resizedHeight) / 2)))
+			y = int((resizedHeight - int(height)) / 2)
 		case CROP_MODE_LEFTBOTTOM, CROP_MODE_CENTERBOTTOM, CROP_MODE_RIGHTBOTTOM:
-			y = int(math.Abs(float64((int(height) - resizedHeight))))
+			y = int((resizedHeight - int(height)))
 		}
 	}
 	if resizedHeight == int(height) {
@@ -389,15 +387,15 @@ func (t ThumbsServer) generateThumbnailModeCrop(img image.Image, width, height u
 		case CROP_MODE_LEFTTOP, CROP_MODE_LEFTMIDDLE, CROP_MODE_LEFTBOTTOM:
 			x = 0
 		case CROP_MODE_RIGHTTOP, CROP_MODE_RIGHTMIDDLE, CROP_MODE_RIGHTBOTTOM:
-			x = int(math.Abs(float64((int(width) - resizedWidth))))
+			x = int(resizedWidth - int(width))
 		case CROP_MODE_CENTERTOP, CROP_MODE_CENTERCENTER, CROP_MODE_CENTERBOTTOM:
-			x = int(math.Abs(float64((int(width) - resizedWidth) / 2)))
+			x = int((resizedWidth - int(width)) / 2)
 		}
 	}
 
 	// 创建目标大小的画布
 	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	t.logger.Info("x,y,w,h", zap.Int("x", x), zap.Int("y", y), zap.Int("width", resizedWidth), zap.Int("height", resizedHeight))
+	// t.logger.Info("x,y,w,h", zap.Int("x", x), zap.Int("y", y), zap.Int("width", resizedWidth), zap.Int("height", resizedHeight))
 	// 绘制裁剪后的图片
 	draw.Draw(canvas, canvas.Bounds(), resized, image.Point{x, y}, draw.Over)
 	return canvas
