@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -30,22 +31,26 @@ import (
 )
 
 const (
-	SCALE_MODE_M          = 0
-	SCALE_MODE_W          = 1
-	SCALE_MODE_WLT        = 2
-	SCALE_MODE_WLC        = 3
-	SCALE_MODE_WLB        = 4
-	SCALE_MODE_WRT        = 5
-	SCALE_MODE_WRC        = 6
-	SCALE_MODE_WRB        = 7
-	SCALE_MODE_WCC        = 8
-	CROP_MODE_LEFTTOP     = 9
-	CROP_MODE_LEFTMIDDLE  = 10
-	CROP_MODE_LEFTBOTTOM  = 11
-	CROP_MODE_RIGHTTOP    = 12
-	CROP_MODE_RIGHTMIDDLE = 13
-	CROP_MODE_RIGHTBOTTOM = 14
-	CROP_MODE_CENTER      = 15
+	SCALE_MODE_M           = 0
+	SCALE_MODE_W           = 1
+	SCALE_MODE_WLT         = 2
+	SCALE_MODE_WLC         = 3
+	SCALE_MODE_WLB         = 4
+	SCALE_MODE_WRT         = 5
+	SCALE_MODE_WRC         = 6
+	SCALE_MODE_WRB         = 7
+	SCALE_MODE_WCC         = 8
+	SCALE_MODE_WCT         = 9
+	SCALE_MODE_WCB         = 10
+	CROP_MODE_LEFTTOP      = 11
+	CROP_MODE_LEFTMIDDLE   = 12
+	CROP_MODE_LEFTBOTTOM   = 13
+	CROP_MODE_RIGHTTOP     = 14
+	CROP_MODE_RIGHTMIDDLE  = 15
+	CROP_MODE_RIGHTBOTTOM  = 16
+	CROP_MODE_CENTERTOP    = 17
+	CROP_MODE_CENTERCENTER = 18
+	CROP_MODE_CENTERBOTTOM = 19
 )
 
 var cropModeMap = map[string]int{
@@ -57,14 +62,20 @@ var cropModeMap = map[string]int{
 	"wrt": SCALE_MODE_WRT,
 	"wrc": SCALE_MODE_WRC,
 	"wrb": SCALE_MODE_WRB,
+	"wct": SCALE_MODE_WCT,
 	"wcc": SCALE_MODE_WCC,
+	"wcb": SCALE_MODE_WCB,
+	"wc":  SCALE_MODE_WCC,
 	"lt":  CROP_MODE_LEFTTOP,
 	"lc":  CROP_MODE_LEFTMIDDLE,
 	"lb":  CROP_MODE_LEFTBOTTOM,
 	"rt":  CROP_MODE_RIGHTTOP,
 	"rc":  CROP_MODE_RIGHTMIDDLE,
 	"rb":  CROP_MODE_RIGHTBOTTOM,
-	"c":   CROP_MODE_CENTER,
+	"ct":  CROP_MODE_CENTERTOP,
+	"cc":  CROP_MODE_CENTERCENTER,
+	"cb":  CROP_MODE_CENTERBOTTOM,
+	"c":   CROP_MODE_CENTERCENTER,
 }
 
 func init() {
@@ -131,7 +142,7 @@ func (t *ThumbsServer) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("thumbs_storage is required")
 	}
 
-	t.regex = regexp.MustCompile(`^.*\/((\w)(\d+)x(\d+)(?:,([a-fA-F0-9]{6}|[a-fA-F0-9]{8}))?(?:,q(\d+))?(?:,(\w+))?)\/((?:.+)(\.\w+))$`)
+	t.regex = regexp.MustCompile(`^.*\/(([a-z]+)(\d+)x(\d+)(?:,([a-fA-F0-9]{6}|[a-fA-F0-9]{8}))?(?:,q(\d+))?(?:,(\w+))?)\/((?:.+)(\.\w+))$`)
 	t.ctx = ctx
 	return nil
 }
@@ -283,14 +294,16 @@ func (t ThumbsServer) generateThumbnail(reader io.Reader, width, height uint, mo
 	// 根据模式生成缩略图
 	switch modeId {
 	case SCALE_MODE_M:
-		img = resize.Thumbnail(width, height, img, resize.Lanczos3)
-	case SCALE_MODE_WLT, SCALE_MODE_WLC, SCALE_MODE_WLB, SCALE_MODE_WRT, SCALE_MODE_WRC, SCALE_MODE_WRB, SCALE_MODE_WCC:
-		img = t.generateThumbnailModeW(img, width, height, bgColor, modeId)
-	case CROP_MODE_LEFTTOP, CROP_MODE_LEFTMIDDLE, CROP_MODE_LEFTBOTTOM, CROP_MODE_RIGHTTOP, CROP_MODE_RIGHTMIDDLE, CROP_MODE_RIGHTBOTTOM, CROP_MODE_CENTER:
-		img = t.generateThumbnailModeCrop(img, width, height, modeId)
+		newImg := resize.Thumbnail(width, height, img, resize.Lanczos3)
+		return t.encodeImage(newImg, quality, format)
+	case SCALE_MODE_WLT, SCALE_MODE_WLC, SCALE_MODE_WLB, SCALE_MODE_WRT, SCALE_MODE_WRC, SCALE_MODE_WRB, SCALE_MODE_WCC, SCALE_MODE_WCT, SCALE_MODE_WCB:
+		newImg := t.generateThumbnailModeW(img, width, height, bgColor, modeId)
+		return t.encodeImage(newImg, quality, format)
+	case CROP_MODE_LEFTTOP, CROP_MODE_LEFTMIDDLE, CROP_MODE_LEFTBOTTOM, CROP_MODE_RIGHTTOP, CROP_MODE_RIGHTMIDDLE, CROP_MODE_RIGHTBOTTOM, CROP_MODE_CENTERTOP, CROP_MODE_CENTERCENTER, CROP_MODE_CENTERBOTTOM:
+		newImg := t.generateThumbnailModeCrop(img, width, height, modeId)
+		return t.encodeImage(newImg, quality, format)
 	}
-	// 编码缩略图
-	return t.encodeImage(img, quality, format)
+	return nil, fmt.Errorf("unsupported thumbnail mode: %s", mode)
 }
 
 // generateThumbnailModeW 模式w：保持纵横比，缩放到目标尺寸以内，然后将不足的部分填充为指定颜色
@@ -302,27 +315,34 @@ func (t ThumbsServer) generateThumbnailModeW(img image.Image, width, height uint
 	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
 	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
 	var (
-		resizedBounds     = resized.Bounds()
-		x, y          int = (int(width) - resizedBounds.Dx()) / 2, (int(height) - resizedBounds.Dy()) / 2
+		resizedBounds                   = resized.Bounds()
+		resizedWidth, resizedHeight     = resizedBounds.Dx(), resizedBounds.Dy()
+		x, y                        int = (int(width) - resizedWidth) / 2, (int(height) - resizedHeight) / 2
 	)
-	switch modeId {
-	case SCALE_MODE_WLT:
-		x, y = 0, 0
-	case SCALE_MODE_WLC:
-		x = (int(width) - resizedBounds.Dx()) / 2
-		y = 0
-	case SCALE_MODE_WLB:
-		x, y = 0, (int(height) - resizedBounds.Dy())
-	case SCALE_MODE_WRT:
-		x, y = (int(width) - resizedBounds.Dx()), 0
-	case SCALE_MODE_WRC:
-		x, y = (int(width) - resizedBounds.Dx()), (int(height) - resizedBounds.Dy())
-	case SCALE_MODE_WRB:
-		x, y = (int(width) - resizedBounds.Dx()), (int(height) - resizedBounds.Dy())
+	if resizedWidth == int(width) {
+		x = 0
+		switch modeId {
+		case SCALE_MODE_WLT, SCALE_MODE_WCT, SCALE_MODE_WRT:
+			y = 0
+		case SCALE_MODE_WLC, SCALE_MODE_WCC, SCALE_MODE_WRC:
+			y = (int(height) - resizedHeight) / 2
+		case SCALE_MODE_WLB, SCALE_MODE_WRB, SCALE_MODE_WCB:
+			y = (int(height) - resizedHeight)
+		}
 	}
-
+	if resizedHeight == int(height) {
+		y = 0
+		switch modeId {
+		case SCALE_MODE_WLT, SCALE_MODE_WRT, SCALE_MODE_WCT:
+			x = 0
+		case SCALE_MODE_WLC, SCALE_MODE_WCC, SCALE_MODE_WRC:
+			x = (int(width) - resizedWidth) / 2
+		case SCALE_MODE_WLB, SCALE_MODE_WRB, SCALE_MODE_WCB:
+			x = (int(width) - resizedWidth)
+		}
+	}
 	// 将缩略图绘制到画布上
-	draw.Draw(canvas, image.Rect(x, y, x+resizedBounds.Dx(), y+resizedBounds.Dy()), resized, image.Point{}, draw.Over)
+	draw.Draw(canvas, image.Rect(x, y, x+resizedWidth, y+resizedHeight), resized, image.Point{0, 0}, draw.Over)
 	return canvas
 }
 
@@ -346,37 +366,38 @@ func (t ThumbsServer) generateThumbnailModeCrop(img image.Image, width, height u
 	resized := resize.Resize(scaledWidth, scaledHeight, img, resize.Lanczos3)
 	// 计算裁剪位置
 	var (
-		resizedBounds = resized.Bounds()
+		resizedBounds               = resized.Bounds()
+		resizedWidth, resizedHeight = resizedBounds.Dx(), resizedBounds.Dy()
 		// 计算裁剪位置
-		x = (resizedBounds.Dx() - int(width)) / 2
-		y = (resizedBounds.Dy() - int(height)) / 2
+		x = (resizedWidth - int(width)) / 2
+		y = (resizedHeight - int(height)) / 2
 	)
-	switch cropMode {
-	case CROP_MODE_LEFTTOP:
-		// 从左上角裁剪
-		x, y = 0, 0
-	case CROP_MODE_LEFTMIDDLE:
-		// 从左中裁剪
-		x, y = 0, (int(height)-resizedBounds.Dy())/2
-	case CROP_MODE_LEFTBOTTOM:
-		// 从左下裁剪
-		x, y = 0, int(height)-resizedBounds.Dy()
-	case CROP_MODE_RIGHTTOP:
-		// 从右上裁剪
-		x, y = int(width)-resizedBounds.Dx(), 0
-	case CROP_MODE_RIGHTMIDDLE:
-		// 从右中裁剪
-		x, y = int(width)-resizedBounds.Dx(), (int(height)-resizedBounds.Dy())/2
-	case CROP_MODE_RIGHTBOTTOM:
-		// 从右下裁剪
-		x, y = int(width)-resizedBounds.Dx(), int(height)-resizedBounds.Dy()
-	default: // 包含 CROP_MODE_CENTER
-		// 从中心裁剪
-		x, y = (int(width)-resizedBounds.Dx())/2, (int(height)-resizedBounds.Dy())/2
+	if resizedWidth == int(width) {
+		x = 0
+		switch cropMode {
+		case CROP_MODE_LEFTTOP, CROP_MODE_CENTERTOP, CROP_MODE_RIGHTTOP:
+			y = 0
+		case CROP_MODE_LEFTMIDDLE, CROP_MODE_CENTERCENTER, CROP_MODE_RIGHTMIDDLE:
+			y = int(math.Abs(float64((int(height) - resizedHeight) / 2)))
+		case CROP_MODE_LEFTBOTTOM, CROP_MODE_CENTERBOTTOM, CROP_MODE_RIGHTBOTTOM:
+			y = int(math.Abs(float64((int(height) - resizedHeight))))
+		}
+	}
+	if resizedHeight == int(height) {
+		y = 0
+		switch cropMode {
+		case CROP_MODE_LEFTTOP, CROP_MODE_LEFTMIDDLE, CROP_MODE_LEFTBOTTOM:
+			x = 0
+		case CROP_MODE_RIGHTTOP, CROP_MODE_RIGHTMIDDLE, CROP_MODE_RIGHTBOTTOM:
+			x = int(math.Abs(float64((int(width) - resizedWidth))))
+		case CROP_MODE_CENTERTOP, CROP_MODE_CENTERCENTER, CROP_MODE_CENTERBOTTOM:
+			x = int(math.Abs(float64((int(width) - resizedWidth) / 2)))
+		}
 	}
 
 	// 创建目标大小的画布
 	canvas := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	t.logger.Info("x,y,w,h", zap.Int("x", x), zap.Int("y", y), zap.Int("width", resizedWidth), zap.Int("height", resizedHeight))
 	// 绘制裁剪后的图片
 	draw.Draw(canvas, canvas.Bounds(), resized, image.Point{x, y}, draw.Over)
 	return canvas
